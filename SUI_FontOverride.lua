@@ -1,27 +1,32 @@
--- SUI Font Override (Pink / Night-Elf Purple)
--- Candy + Nova — v1.5
+-- SUI Font Override (Pink / Night-Elf Purple) — v1.6 (combined)
+-- Candy + Nova
 
-local PINK   = { r = 1.00, g = 0.42, b = 0.88 }   -- WA pink (for "yellow" text when needed)
-local PURPLE = { r = 0.45, g = 0.28, b = 0.65 }   -- Night Elf purple (headers)
+-- ========== palette ==========
+local PINK   = { r = 1.00, g = 0.42, b = 0.88 }   -- WA pink (default yellow -> this)
+local PURPLE = { r = 0.45, g = 0.28, b = 0.65 }   -- Header bars/titles
 
 local function rgb(c) return c.r, c.g, c.b end
 local function hex(c) return ("|cFF%02X%02X%02X"):format(
   math.floor(c.r*255+0.5), math.floor(c.g*255+0.5), math.floor(c.b*255+0.5)
 ) end
 
--- --- utils ---
-local function stripCodes(s) if not s then return s end s=s:gsub("|c%x%x%x%x%x%x%x%x",""); s=s:gsub("|r",""); return s end
-local function paint(fs, c) if fs and fs.SetTextColor then fs:SetTextColor(rgb(c)) end end
+local function stripCodes(s)
+  if not s then return s end
+  s = s:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r","")
+  return s
+end
 
--- Hook a FontString so any future SetText/SetFormattedText keeps our color
-local function hookColor(fs, color)
+local function paint(fs, col) if fs and fs.SetTextColor then fs:SetTextColor(rgb(col)) end end
+
+-- Color-lock a FontString (rewrites & hooks SetText/SetFormattedText)
+local function hookColor(fs, col)
   if not fs or fs.__candy_hooked then return end
   fs.__candy_hooked = true
   local function apply(self, raw)
     local clean = stripCodes(raw or self:GetText() or "")
     if clean == "" or self.__candy_lock then return end
     self.__candy_lock = true
-    self:SetText(hex(color)..clean.."|r")
+    self:SetText(hex(col)..clean.."|r")
     self.__candy_lock = false
   end
   hooksecurefunc(fs, "SetText", function(self, t) apply(self, t) end)
@@ -29,7 +34,60 @@ local function hookColor(fs, color)
   apply(fs)
 end
 
--- Tint header background/shine/glow textures purple (those gold bars)
+-- ========== 1) Global “yellow buckets” -> pink (and font objects) ==========
+local YellowFontTargets = {
+  -- Common “yellow/gold” fonts used across the UI
+  "GameFontNormal","GameFontNormalLarge","GameFontNormalHuge","GameFontNormalMed3","GameFontNormalSmall","GameFont_Gigantic","GameFontNormalHuge2",
+  "GameFontHighlight","GameFontHighlightSmall",
+  "ObjectiveFont",
+  "QuestFont_Normal","QuestFont_Highlight","QuestFont_Enormous","QuestFont_Super_Huge","QuestFont_Super_Huge_Outline","QuestTitleFontBlackShadow",
+  "NumberFontNormalYellow","NumberFontNormalRightYellow","NumberFontNormalLargeYellow","NumberFontNormalLargeRightYellow",
+  "AchievementDateFont","AchievementPointsFont","AchievementPointsFontSmall","SplashHeaderFont",
+  -- Extras that show up in menus/alerts on some skins
+  "GameFontNormalOutline","GameFontHighlightOutline",
+  "QuestFont_Large","QuestFont_Huge","QuestFont_Shadow_Huge",
+  "MailFont_Large","SystemFont_Med1","SystemFont_Med2","SystemFont_Med3","SystemFont_Large","SystemFont_Huge1",
+}
+
+local function RecolorYellowFontsList()
+  for _, name in ipairs(YellowFontTargets) do
+    local f = _G[name]
+    if f and f.SetTextColor then f:SetTextColor(rgb(PINK)) end
+  end
+  -- World Map navbar “Home”
+  if WorldMapFrame and WorldMapFrame.NavBar and WorldMapFrame.NavBar.home and WorldMapFrame.NavBar.home.text then
+    WorldMapFrame.NavBar.home.text:SetTextColor(rgb(PINK))
+  end
+end
+
+local function ApplyGlobalPalette()
+  -- ColorMixins many frames reference directly
+  if NORMAL_FONT_COLOR      and NORMAL_FONT_COLOR.SetRGB      then NORMAL_FONT_COLOR:SetRGB(rgb(PINK)) end
+  if HIGHLIGHT_FONT_COLOR   and HIGHLIGHT_FONT_COLOR.SetRGB   then HIGHLIGHT_FONT_COLOR:SetRGB(rgb(PINK)) end
+  if YELLOW_FONT_COLOR      and YELLOW_FONT_COLOR.SetRGB      then YELLOW_FONT_COLOR:SetRGB(rgb(PINK)) end
+  if LIGHTYELLOW_FONT_COLOR and LIGHTYELLOW_FONT_COLOR.SetRGB then LIGHTYELLOW_FONT_COLOR:SetRGB(rgb(PINK)) end
+  if GOLD_FONT_COLOR        and GOLD_FONT_COLOR.SetRGB        then GOLD_FONT_COLOR:SetRGB(rgb(PINK)) end
+
+  -- Override inline string color codes (so baked “|cffFFD100” style strings pull pink)
+  _G.FONT_COLOR_CODE_CLOSE       = "|r"
+  _G.YELLOW_FONT_COLOR_CODE      = hex(PINK)
+  _G.LIGHTYELLOW_FONT_COLOR_CODE = hex(PINK)
+  _G.HIGHLIGHT_FONT_COLOR_CODE   = hex(PINK)
+
+  -- Objective Tracker palette (logic colors)
+  if OBJECTIVE_TRACKER_COLOR then
+    local function setC(key, col)
+      local c = OBJECTIVE_TRACKER_COLOR[key]
+      if c then if c.SetRGB then c:SetRGB(col.r, col.g, col.b) end; c.r,c.g,c.b = col.r,col.g,col.b end
+    end
+    for _, k in ipairs({"Normal","Objective","TimeLeft","Failed"}) do setC(k, PINK) end
+    for _, k in ipairs({"Header","Complete"}) do setC(k, PURPLE) end
+  end
+
+  RecolorYellowFontsList()
+end
+
+-- ========== 2) Objective Tracker: headers purple, lines pink ==========
 local function tintHeaderTextures(h)
   if not h then return end
   local function tint(tex, a)
@@ -38,9 +96,7 @@ local function tintHeaderTextures(h)
       tex:SetVertexColor(PURPLE.r, PURPLE.g, PURPLE.b, a or tex:GetAlpha() or 1)
     end
   end
-  tint(h.Background)
-  tint(h.Shine, 0.85)
-  tint(h.Glow,  0.85)
+  tint(h.Background); tint(h.Shine, 0.85); tint(h.Glow, 0.85)
   if h.NineSlice and h.NineSlice.GetRegions then
     for _, r in ipairs({ h.NineSlice:GetRegions() }) do
       if r and r.SetVertexColor then r:SetVertexColor(PURPLE.r, PURPLE.g, PURPLE.b) end
@@ -48,70 +104,56 @@ local function tintHeaderTextures(h)
   end
 end
 
--- Deep-scan a header for any FontStrings + tint textures
 local function enforceHeader(h)
   if not h then return end
   if h.Text then hookColor(h.Text, PURPLE) end
   if h.GetRegions then
     for _, r in ipairs({ h:GetRegions() }) do
-      if r and r.GetObjectType and r:GetObjectType()=="FontString" then hookColor(r, PURPLE) end
+      if r and r.GetObjectType and r:GetObjectType() == "FontString" then hookColor(r, PURPLE) end
     end
   end
   tintHeaderTextures(h)
 end
 
--- ===== GLOBAL PALETTE (keep white white; make "yellow buckets" pink) =====
-local function ApplyGlobalPalette()
-  if NORMAL_FONT_COLOR      and NORMAL_FONT_COLOR.SetRGB      then NORMAL_FONT_COLOR:SetRGB(rgb(PINK)) end
-  if HIGHLIGHT_FONT_COLOR   and HIGHLIGHT_FONT_COLOR.SetRGB   then HIGHLIGHT_FONT_COLOR:SetRGB(rgb(PINK)) end
-  if YELLOW_FONT_COLOR      and YELLOW_FONT_COLOR.SetRGB      then YELLOW_FONT_COLOR:SetRGB(rgb(PINK)) end
-  if LIGHTYELLOW_FONT_COLOR and LIGHTYELLOW_FONT_COLOR.SetRGB then LIGHTYELLOW_FONT_COLOR:SetRGB(rgb(PINK)) end
-  if GOLD_FONT_COLOR        and GOLD_FONT_COLOR.SetRGB        then GOLD_FONT_COLOR:SetRGB(rgb(PINK)) end
-
-  -- also override inline color codes some UI strings embed
-  _G.FONT_COLOR_CODE_CLOSE       = "|r"
-  _G.YELLOW_FONT_COLOR_CODE      = hex(PINK)
-  _G.LIGHTYELLOW_FONT_COLOR_CODE = hex(PINK)
-  _G.HIGHLIGHT_FONT_COLOR_CODE   = hex(PINK)
-
-  -- we purposely DO NOT recolor GameFontWhite etc. — white stays white
+local function PaintTrackerTopBar()
+  local m = ObjectiveTrackerFrame and ObjectiveTrackerFrame.HeaderMenu
+  if not m then return end
+  for _, obj in ipairs({ m.Title, m.TitleText, m.Text, m.Label }) do
+    if obj and obj.GetObjectType and obj:GetObjectType()=="FontString" then hookColor(obj, PURPLE) end
+  end
+  if m.GetRegions then
+    for _, r in ipairs({ m:GetRegions() }) do
+      if r and r.GetObjectType and r:GetObjectType()=="FontString" then hookColor(r, PURPLE) end
+    end
+  end
 end
 
--- Explicitly target the module headers you showed in FrameStack
 local function PaintAllModuleHeaders()
   local list = {
-    ObjectiveTrackerFrame and ObjectiveTrackerFrame.Header,  -- "All Objectives" (top)
-    _G.QuestObjectiveTracker and _G.QuestObjectiveTracker.Header,            -- "Quests"
-    _G.CampaignQuestObjectiveTracker and _G.CampaignQuestObjectiveTracker.Header, -- "Campaign"
+    ObjectiveTrackerFrame and ObjectiveTrackerFrame.Header,
+    _G.QuestObjectiveTracker and _G.QuestObjectiveTracker.Header,
+    _G.CampaignQuestObjectiveTracker and _G.CampaignQuestObjectiveTracker.Header,
     _G.WorldQuestObjectiveTracker and _G.WorldQuestObjectiveTracker.Header,
     _G.ScenarioObjectiveTracker and _G.ScenarioObjectiveTracker.Header,
     _G.AchievementObjectiveTracker and _G.AchievementObjectiveTracker.Header,
   }
   for _, h in ipairs(list) do enforceHeader(h) end
+  PaintTrackerTopBar()
 end
 
--- Repaint objective lines only if they’re using the tracker “yellow”; keep white alone
 local function RepaintLines()
   local frame = ObjectiveTrackerFrame
   if not frame then return end
   local blocks = ObjectiveTrackerBlocksFrame or (frame and frame.BlocksFrame)
   if not blocks or not blocks.usedBlocks then return end
-
   for _, block in pairs(blocks.usedBlocks) do
-    -- quest name (header inside the block) → purple
     if block.HeaderText then hookColor(block.HeaderText, PURPLE) end
-    -- objective lines: only nudge if they’re using the tracker’s yellow-ish color
     if block.lines then
       for _, line in pairs(block.lines) do
-        local fs = line.Text or line.leftText or line.rightText
-        if fs and fs.GetTextColor then
-          local r,g,b = fs:GetTextColor()
-          -- heuristic: if it's gold-ish, make it pink; otherwise leave (white stays white)
-          if r and g and b and r > 0.8 and g > 0.6 and b < 0.3 then
-            paint(fs, PINK)
-          end
-        end
-        if line.Dash then paint(line.Dash, PINK) end
+        if line.Dash     then paint(line.Dash, PINK) end
+        if line.Text     then paint(line.Text, PINK) end
+        if line.leftText then paint(line.leftText, PINK) end
+        if line.rightText then paint(line.rightText, PINK) end
       end
     end
   end
@@ -125,55 +167,97 @@ end
 local function HookTracker()
   if ObjectiveTracker_Update then hooksecurefunc("ObjectiveTracker_Update", RepaintObjectiveTracker) end
   for _, m in ipairs({
-    _G.QUEST_TRACKER_MODULE,
-    _G.CAMPAIGN_QUEST_TRACKER_MODULE,
-    _G.WORLD_QUEST_TRACKER_MODULE,
-    _G.SCENARIO_TRACKER_MODULE,
-    _G.ACHIEVEMENT_TRACKER_MODULE,
+    _G.QUEST_TRACKER_MODULE, _G.CAMPAIGN_QUEST_TRACKER_MODULE,
+    _G.WORLD_QUEST_TRACKER_MODULE, _G.SCENARIO_TRACKER_MODULE, _G.ACHIEVEMENT_TRACKER_MODULE,
   }) do if m and m.Update then hooksecurefunc(m, "Update", RepaintObjectiveTracker) end end
-
-  -- do a couple delayed passes (skins recolor a frame later)
   C_Timer.After(0.05, RepaintObjectiveTracker)
   C_Timer.After(0.25, RepaintObjectiveTracker)
 end
 
--- Chat “attention” channels → pink (white chat unaffected)
+-- ========== 3) Chat attention channels -> pink (white chat untouched) ==========
 local function PinkifyChat()
   if not ChatTypeInfo then return end
-  for _, t in ipairs({
-    "SYSTEM","EMOTE","TEXT_EMOTE","ACHIEVEMENT","GUILD_ACHIEVEMENT",
-    "RAID_WARNING","RAID_BOSS_EMOTE","RAID_BOSS_WHISPER"
-  }) do local info=ChatTypeInfo[t]; if info then info.r,info.g,info.b = rgb(PINK) end end
+  for _, t in ipairs({"SYSTEM","EMOTE","TEXT_EMOTE","ACHIEVEMENT","GUILD_ACHIEVEMENT","RAID_WARNING","RAID_BOSS_EMOTE","RAID_BOSS_WHISPER"}) do
+    local info = ChatTypeInfo[t]; if info then info.r,info.g,info.b = rgb(PINK) end
+  end
 end
 
--- Slash
+-- ========== 4) Tooltips & alerts: replace common yellow hex with pink ==========
+local function HookTooltipColors()
+  if not GameTooltip then return end
+  GameTooltip:HookScript("OnShow", function(self)
+    for i = 1, self:NumLines() do
+      local line = _G["GameTooltipTextLeft"..i]
+      if line then
+        local text = line:GetText()
+        if text and text:find("|cff") then
+          text = text:gsub("|cffFFD700", hex(PINK))  -- gold
+                     :gsub("|cffFFFF00", hex(PINK))  -- yellow
+                     :gsub("|cffFFD100", hex(PINK))  -- quest yellow
+          line:SetText(text)
+        end
+      end
+    end
+  end)
+end
+
+local function HookAlertFrames()
+  if AchievementAlertFrame_ShowAlert then
+    hooksecurefunc("AchievementAlertFrame_ShowAlert", function()
+      C_Timer.After(0.1, function()
+        for i=1,MAX_ACHIEVEMENT_ALERTS or 4 do
+          local f=_G["AchievementAlertFrame"..i]
+          if f and f:IsShown() then if f.Name then paint(f.Name,PINK) end; if f.Points then paint(f.Points,PINK) end end
+        end
+      end)
+    end)
+  end
+end
+
+-- ========== 5) Extra quest events to repaint quickly ==========
+local function HookQuestEvents()
+  local f = CreateFrame("Frame")
+  f:RegisterEvent("QUEST_LOG_UPDATE")
+  f:RegisterEvent("QUEST_WATCH_UPDATE")
+  f:RegisterEvent("QUEST_PROGRESS")
+  f:RegisterEvent("QUEST_COMPLETE")
+  f:RegisterEvent("UI_INFO_MESSAGE")
+  f:SetScript("OnEvent", function(_, evt, msg)
+    C_Timer.After(0.1, RepaintObjectiveTracker)
+  end)
+end
+
+-- ========== 6) Slash ==========
 SLASH_SUIFONT1, SLASH_SUIFONT2 = "/suifont", "/candypink"
 SlashCmdList.SUIFONT = function(msg)
   msg = (msg or ""):lower()
   if msg == "debug" then
-    local r,g,b = NORMAL_FONT_COLOR and NORMAL_FONT_COLOR:GetRGB() or 0,0,0
-    print("|cffF48CBA[SUI Font Override]|r NORMAL_FONT_COLOR:", r,g,b)
-    print("Tracker:", ObjectiveTrackerFrame and "present" or "nil")
+    local r,g,b = NORMAL_FONT_COLOR and NORMAL_FONT_COLOR.GetRGB and NORMAL_FONT_COLOR:GetRGB() or 0,0,0
+    print("|cffF48CBA[SUI Font Override]|r NORMAL_FONT_COLOR:", r,g,b, " Tracker:", ObjectiveTrackerFrame and "present" or "nil")
   else
-    ApplyGlobalPalette(); PinkifyChat(); HookTracker(); RepaintObjectiveTracker()
+    ApplyGlobalPalette(); PinkifyChat(); HookTracker(); HookQuestEvents(); HookTooltipColors(); HookAlertFrames(); RepaintObjectiveTracker()
     print("|cffF48CBA[SUI Font Override]|r refresh complete.")
   end
 end
 
--- Boot
-local f = CreateFrame("Frame")
-f:RegisterEvent("PLAYER_LOGIN")
-f:RegisterEvent("ADDON_LOADED")
-f:SetScript("OnEvent", function(_, event, arg1)
-  if event == "PLAYER_LOGIN" then
+-- ========== 7) Boot ==========
+local boot = CreateFrame("Frame")
+boot:RegisterEvent("PLAYER_LOGIN")
+boot:RegisterEvent("ADDON_LOADED")
+boot:SetScript("OnEvent", function(_, event, arg1)
+  if event=="PLAYER_LOGIN" then
     ApplyGlobalPalette()
     PinkifyChat()
     HookTracker()
+    HookQuestEvents()
+    HookTooltipColors()
+    HookAlertFrames()
     C_Timer.After(0.1, RepaintObjectiveTracker)
-  elseif event == "ADDON_LOADED" then
-    if arg1 == "Blizzard_ObjectiveTracker" or arg1 == "SUI" then
+  elseif event=="ADDON_LOADED" then
+    if arg1=="Blizzard_ObjectiveTracker" or arg1=="Blizzard_AchievementUI" or arg1=="Blizzard_WorldMap" or arg1=="SUI" then
       C_Timer.After(0.1, function()
         ApplyGlobalPalette()
+        RecolorYellowFontsList()
         RepaintObjectiveTracker()
       end)
     end
