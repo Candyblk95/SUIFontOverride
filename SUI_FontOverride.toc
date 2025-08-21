@@ -1,0 +1,9 @@
+## Interface: 110100
+## Title: SUI Font Override
+## Notes: Converts yellow fonts to pink to match SUI theme
+## Author: Custom
+## Version: 1.0
+## Dependencies: SUI
+## LoadOnDemand: 0
+
+SUI_FontOverride.lua
