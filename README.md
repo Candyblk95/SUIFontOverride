@@ -25,3 +25,5 @@ Bonus tiny knobs (optional, not color but “glow-y-ness”):
 `In the atlas hook I set highlight/shine alphas to 0.9 / 0.85. Nudge those up/down if you want the glows louder/softer.`
 
 That’s it—edit the swatches, refresh, and werk. 💖
+
+Dependacies : https://www.curseforge.com/wow/addons/sui
