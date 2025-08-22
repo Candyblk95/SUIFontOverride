@@ -669,5 +669,28 @@ SlashCmdList.SUIFONT = function(msg)
   PinkifyTrackerAtlases()
   PinkifyQuickJoin()
   PinkifyMinimap()
-  print(hex(PINK).."SUI Font Override|r: refreshed.")
+  PinkifyHelpTips()
+  if msg ~= "silent" and msg ~= "auto" then
+    print(hex(PINK).."SUI Font Override|r: refreshed.")
+  end
+end
+
+-- Auto-run /suifont after login/entering world to catch late-created textures
+do
+  local did
+  local function kick()
+    -- run a few times to sweep textures that appear late
+    C_Timer.After(0.2, function() SlashCmdList.SUIFONT("auto") end)
+    C_Timer.After(1.0, function() SlashCmdList.SUIFONT("auto") end)
+    C_Timer.After(3.0, function() SlashCmdList.SUIFONT("auto") end)
+  end
+
+  local af = CreateFrame("Frame")
+  af:RegisterEvent("PLAYER_LOGIN")
+  af:RegisterEvent("PLAYER_ENTERING_WORLD")
+  af:SetScript("OnEvent", function()
+    if did then return end
+    did = true
+    kick()
+  end)
 end
