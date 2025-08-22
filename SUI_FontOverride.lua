@@ -9,6 +9,10 @@ local ADDON = ...
 local TINT_HEADER_TEXTURES   = false  -- set to true if you want the purple header bars/shines
 local PINKIFY_ONLY_YELLOWISH = false  -- false = recolor listed fonts unconditionally (classic behavior)
                                       -- true  = only recolor those that currently look gold/yellow-ish
+-- NEW: recolor tracker atlas textures (rings, shines, POI icons) to pink
+local TINT_TRACKER_ATLASES   = true
+-- NEW: social + minimap icons/borders
+local TINT_SOCIAL_MINIMAP    = true
 ------------------------------------------------------------
 
 -- === palette ===
@@ -67,6 +71,178 @@ local function isYellowish(r, g, b)
   if not r or not g or not b then return false end
   -- bright, warm, low blue
   return r >= 0.80 and g >= 0.70 and b <= 0.30 and (r - g) <= 0.20
+end
+
+-- ===================================================================
+-- NEW: Atlas/texture tint hook (like header lock, but for Textures)
+-- ===================================================================
+
+-- patterns of tracker atlases we want to pinkify
+local TRACKER_ATLAS_PATTERNS = {
+  "^UI%-QuestTrackerButton",     -- quest item button rings/frames
+  "^UI%-QuestIcon",              -- POI icons (available/turn-in/etc)
+  "^UI%-QuestLog",               -- safety catch
+  "^Quest%-.*%-icon",            -- e.g. Quest-In-Progress-icon-yellow
+  "QuestItem",                   -- misc quest item bits
+}
+
+local function atlasMatches(name)
+  if not name then return false end
+  for _, pat in ipairs(TRACKER_ATLAS_PATTERNS) do
+    if name:find(pat) then return true end
+  end
+  return false
+end
+
+-- lock a Texture to pink, reasserting after SetAtlas/SetTexture/Show
+local function hookTexAtlasPink(tex, color, opts)
+  if not tex or tex.__candy_texhook then return end
+  if not tex.SetVertexColor then return end
+  tex.__candy_texhook = true
+  tex.__candy_texcolor = color or PINK
+  tex.__candy_texforce = opts and opts.force
+  tex.__candy_texblend = opts and opts.blend
+  tex.__candy_texalpha = opts and opts.alpha
+  tex.__candy_matcher  = opts and opts.matcher  -- optional function(atlas, fileID)->bool
+
+  local function apply(self)
+    if not TINT_TRACKER_ATLASES then return end
+    local ok = false
+    local atlas = self.GetAtlas and self:GetAtlas()
+    local file  = self.GetTexture and self:GetTexture()
+    if tex.__candy_matcher then ok = tex.__candy_matcher(atlas, file) end
+    if not ok and atlas and atlasMatches(atlas) then ok = true end
+    if tex.__candy_texforce then ok = true end
+    if not ok then return end
+
+    if self.SetDesaturated then pcall(self.SetDesaturated, self, true) end
+    local a = tex.__candy_texalpha or self:GetAlpha() or 1
+    self:SetVertexColor(tex.__candy_texcolor.r, tex.__candy_texcolor.g, tex.__candy_texcolor.b, a)
+    if tex.__candy_texblend and self.SetBlendMode then
+      pcall(self.SetBlendMode, self, tex.__candy_texblend)
+    end
+  end
+
+  hooksecurefunc(tex, "SetAtlas",   apply)
+  hooksecurefunc(tex, "SetTexture", apply)
+  hooksecurefunc(tex, "Show",       apply)
+  apply(tex)
+end
+
+-- walk tracker frames and hook the interesting textures
+local function PinkifyTrackerAtlases()
+  if not TINT_TRACKER_ATLASES then return end
+
+  local roots = {
+    _G.QuestObjectiveTracker and _G.QuestObjectiveTracker.ContentsFrame,
+    _G.CampaignQuestObjectiveTracker and _G.CampaignQuestObjectiveTracker.ContentsFrame,
+  }
+
+  local function visit(f)
+    if not f then return end
+
+    -- common fields from your frame stacks
+    if f.NormalTexture     then hookTexAtlasPink(f.NormalTexture,     PINK, { force = true }) end
+    if f.HighlightTexture  then hookTexAtlasPink(f.HighlightTexture,  PINK, { force = true, blend = "ADD", alpha = 0.9 }) end
+    if f.Shine             then hookTexAtlasPink(f.Shine,             PINK, { force = true, blend = "ADD", alpha = 0.85 }) end
+    if f.Bg                then hookTexAtlasPink(f.Bg,                PINK, { force = true }) end
+
+    -- POI buttons (quest giver/turn-in/progress)
+    local poi = f.poiButton or f.POIButton or f.Display or (f.poiButton and f.poiButton.Display)
+    if poi then
+      if poi.Icon             then hookTexAtlasPink(poi.Icon,             PINK, { force = true }) end
+      if poi.HighlightTexture then hookTexAtlasPink(poi.HighlightTexture, PINK, { force = true, blend = "ADD", alpha = 0.9 }) end
+      if poi.NormalTexture    then hookTexAtlasPink(poi.NormalTexture,    PINK, { force = true }) end
+    end
+
+    -- unnamed textures that already carry a questy atlas
+    if f.GetRegions then
+      for _, r in ipairs({ f:GetRegions() }) do
+        if r and r.GetObjectType and r:GetObjectType() == "Texture" then
+          local atlas = r.GetAtlas and r:GetAtlas()
+          if atlas and atlasMatches(atlas) then
+            hookTexAtlasPink(r, PINK)
+          end
+        end
+      end
+    end
+
+    if f.GetChildren then
+      for _, c in ipairs({ f:GetChildren() }) do visit(c) end
+    end
+  end
+
+  for _, root in ipairs(roots) do visit(root) end
+end
+
+-- ===================================================================
+-- SOCIAL + MINIMAP (yellow person + minimap roundies)
+-- ===================================================================
+
+-- patterns for social/minimap
+local QUICKJOIN_ATLAS_PATTERNS = {
+  "^quickjoin%-button%-",
+  "^UI%-HUD%-ActionBar%-IconFrame",
+}
+local MINIMAP_ATLAS_PATTERNS = {
+  "^minimap", "^MiniMap", "^UI%-HUD%-Minimap", "Tracking", "Mail",
+}
+local FILEID_MATCH = {
+  [136430] = true, -- MiniMapMailIcon
+}
+
+local function atlasMatches2(name, pats)
+  if not name then return false end
+  for _, p in ipairs(pats) do if name:find(p) then return true end end
+  return false
+end
+
+local function hookTexGenericPink(tex, pats, alsoFile)
+  if not tex or tex.__candy_generic then return end
+  tex.__candy_generic = true
+  hookTexAtlasPink(tex, PINK, {
+    matcher = function(atlas, file)
+      if atlas and atlasMatches2(atlas, pats) then return true end
+      if alsoFile and type(file)=="number" and alsoFile[file] then return true end
+      return false
+    end
+  })
+end
+
+local function PinkifyQuickJoin()
+  if not TINT_SOCIAL_MINIMAP then return end
+  local q = _G.QuickJoinToastButton
+  if not q then return end
+  local function sweep(o)
+    if not o then return end
+    if o.GetRegions then
+      for _, r in ipairs({ o:GetRegions() }) do
+        if r and r.GetObjectType and r:GetObjectType()=="Texture" then
+          hookTexGenericPink(r, QUICKJOIN_ATLAS_PATTERNS)
+        end
+      end
+    end
+    if o.GetChildren then for _, c in ipairs({ o:GetChildren() }) do sweep(c) end end
+  end
+  sweep(q)
+end
+
+local function PinkifyMinimap()
+  if not TINT_SOCIAL_MINIMAP then return end
+  local function sweep(o)
+    if not o then return end
+    if o.GetRegions then
+      for _, r in ipairs({ o:GetRegions() }) do
+        if r and r.GetObjectType and r:GetObjectType()=="Texture" then
+          hookTexGenericPink(r, MINIMAP_ATLAS_PATTERNS, FILEID_MATCH)
+        end
+      end
+    end
+    if o.GetChildren then for _, c in ipairs({ o:GetChildren() }) do sweep(c) end end
+  end
+  sweep(_G.MinimapCluster and _G.MinimapCluster.IndicatorFrame)
+  sweep(_G.MinimapCluster)
+  sweep(_G.Minimap)
 end
 
 -- ===================================================================
@@ -135,7 +311,7 @@ local function ApplyGlobalPalette()
 end
 
 -- ===================================================================
--- 3) Objective Tracker: titles pink, info white
+-- 3) Objective Tracker: titles pink, info white (+ atlas tint)
 -- ===================================================================
 
 local function PaintTrackerTopBar()
@@ -166,6 +342,37 @@ local function HookHeaderMenu()
   end
 end
 
+-- Quest Discovery block: force its FontStrings to WHITE and “!” to PINK
+local function WhiteQuestDiscovery(block)
+  if not block then return end
+  local contents = block.Contents or block.contents or block
+  local function sweep(o)
+    if not o then return end
+    if o.GetRegions then
+      for _, r in ipairs({ o:GetRegions() }) do
+        if r and r.GetObjectType then
+          local t = r:GetObjectType()
+          if t == "FontString" then
+            paint(r, WHITE)
+          elseif t == "Texture" then
+            local name = r.GetAtlas and r:GetAtlas()
+            -- the Exclamation texture is usually named ".Exclamation" or atlas "AutoQuest-Exclamation"
+            if (o.Exclamation and r == o.Exclamation) or (name and name:find("^AutoQuest%-Exclamation")) then
+              hookTexAtlasPink(r, PINK, { force = true })
+            end
+          end
+        end
+      end
+    end
+    if o.GetChildren then for _, c in ipairs({ o:GetChildren() }) do sweep(c) end end
+  end
+
+  -- quick positive ID: most popups have these textures
+  if contents and (contents.Exclamation or contents.QuestionBg or contents.IconShine) then
+    sweep(contents)
+  end
+end
+
 local function RepaintObjectiveTracker()
   local frame = ObjectiveTrackerFrame
   if not frame then return end
@@ -181,6 +388,7 @@ local function RepaintObjectiveTracker()
   if not blocksFrame or not blocksFrame.usedBlocks then return end
 
   for _, block in pairs(blocksFrame.usedBlocks) do
+    -- standard blocks
     if block.HeaderText then hookFontStringColor(block.HeaderText, PINK) end
     if block.lines then
       for _, line in pairs(block.lines) do
@@ -190,10 +398,15 @@ local function RepaintObjectiveTracker()
         if line.rightText then paint(line.rightText, WHITE) end
       end
     end
+    -- Quest Discovery special: make both lines white + exclamation pink
+    WhiteQuestDiscovery(block)
   end
 
   -- also enforce your purple header pass
   if PaintAllModuleHeaders then PaintAllModuleHeaders() end
+
+  -- recolor the tracker’s atlas textures (rings, shines, POIs)
+  PinkifyTrackerAtlases()
 end
 
 -- ===================================================================
@@ -285,8 +498,6 @@ end
 -- ===================================================================
 -- 7) YOUR EXISTING HEADER FIX (UNCHANGED) + toggled texture tint
 -- ===================================================================
-
--- === turn those gold/yellow headers to PURPLE ===
 
 -- keep any FontString locked to our color
 local function hookColor(fs, color)
@@ -400,6 +611,11 @@ local function Init()
   PaintAllModuleHeaders()
   HookGameMenuHeader()
 
+  -- make sure early tracker art gets hit
+  PinkifyTrackerAtlases()
+  PinkifyQuickJoin()
+  PinkifyMinimap()
+
   C_Timer.After(0.05, RepaintObjectiveTracker)
   C_Timer.After(0.25, RepaintObjectiveTracker)
 end
@@ -419,7 +635,9 @@ f:SetScript("OnEvent", function(self, event, arg1)
        arg1 == "Blizzard_AchievementUI"   or
        arg1 == "Blizzard_WorldMap"        or
        arg1 == "Blizzard_Settings"        or
-       arg1 == "SUI" then
+       arg1 == "SUI" or
+       arg1 == "Blizzard_QuickJoinToast" or
+       arg1 == "Blizzard_Minimap" then
       C_Timer.After(0.1, function()
         ApplyGlobalPalette()
         RecolorYellowFontsList()
@@ -429,6 +647,9 @@ f:SetScript("OnEvent", function(self, event, arg1)
         HookAlertFrames()
         PaintAllModuleHeaders()
         HookGameMenuHeader()
+        PinkifyTrackerAtlases()
+        PinkifyQuickJoin()
+        PinkifyMinimap()
       end)
     end
   end
@@ -445,5 +666,8 @@ SlashCmdList.SUIFONT = function(msg)
   RepaintObjectiveTracker()
   PaintAllModuleHeaders()
   HookGameMenuHeader()
+  PinkifyTrackerAtlases()
+  PinkifyQuickJoin()
+  PinkifyMinimap()
   print(hex(PINK).."SUI Font Override|r: refreshed.")
 end
